@@ -4,7 +4,6 @@ import {
     Container,
     CssBaseline,
     Paper,
-    ThemeProvider,
     Typography,
     TextField,
     IconButton,
@@ -41,12 +40,42 @@ import {
 const STORAGE_KEY = "three_way_trade_analyzer.v2";
 
 // ----------------------------
-// Your logic stays the same
+// Upgrader for old saved data
 // ----------------------------
+function upgradeTeamsSchema(rawTeams) {
+    if (!Array.isArray(rawTeams)) return null;
+    return rawTeams.map((t) => ({
+        ...t,
+        players: (t.players || []).map((p) => {
+            // Old schema had: { id, name, value, enabled, toTeamId }
+            // New schema: { id, name, senderValue, receiverValues, enabled, toTeamId }
+            const senderValue =
+                typeof p.senderValue === "number"
+                    ? p.senderValue
+                    : typeof p.value === "number"
+                        ? p.value
+                        : 0;
+            const receiverValues =
+                p.receiverValues && typeof p.receiverValues === "object"
+                    ? p.receiverValues
+                    : {}; // empty; user fills per destination
+            return {
+                id: p.id,
+                name: p.name ?? "Player",
+                senderValue,
+                receiverValues,
+                enabled: p.enabled !== false,
+                toTeamId: p.toTeamId ?? t.id, // default to own team (no trade)
+            };
+        }),
+    }));
+}
+
 function loadSavedTeams() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : null;
+        const parsed = raw ? JSON.parse(raw) : null;
+        return upgradeTeamsSchema(parsed);
     } catch {
         return null;
     }
@@ -80,7 +109,6 @@ export default function ThemedApp() {
                 </Stack>
             </Box>
 
-
             {/* Wrapped "real app" */}
             <AppCore />
         </ThemeManagerProvider>
@@ -88,7 +116,7 @@ export default function ThemedApp() {
 }
 
 // ------------------------------------------------------------
-// 🔥 Your original App, unchanged except removed ThemeProvider
+// 🔥 App with asymmetric values
 // ------------------------------------------------------------
 function AppCore() {
     const defaultTeams = [
@@ -96,14 +124,28 @@ function AppCore() {
             id: "A",
             name: "Team A",
             players: [
-                { id: "a1", name: "Player A1", value: 32, enabled: true, toTeamId: "B" },
+                {
+                    id: "a1",
+                    name: "Player A1",
+                    senderValue: 32,
+                    receiverValues: { B: 35 }, // worth 35 to B
+                    enabled: true,
+                    toTeamId: "B",
+                },
             ],
         },
         {
             id: "B",
             name: "Team B",
             players: [
-                { id: "b1", name: "Player B1", value: 27, enabled: true, toTeamId: "A" },
+                {
+                    id: "b1",
+                    name: "Player B1",
+                    senderValue: 27,
+                    receiverValues: { A: 31 }, // worth 31 to A
+                    enabled: true,
+                    toTeamId: "A",
+                },
             ],
         },
     ];
@@ -120,7 +162,7 @@ function AppCore() {
     };
 
     const addTeam = () => {
-        const nextId = `T${teams.length + 1}`;
+        const nextId = suggestTeamId(teams);
         setTeams([...teams, { id: nextId, name: `Team ${nextId}`, players: [] }]);
     };
 
@@ -140,7 +182,8 @@ function AppCore() {
                             {
                                 id: newId,
                                 name: "New Player",
-                                value: 0,
+                                senderValue: 0,
+                                receiverValues: {}, // remembered per destination as user edits
                                 enabled: true,
                                 toTeamId: others[0] ?? teamId,
                             },
@@ -160,18 +203,20 @@ function AppCore() {
             )
         );
 
-    const updatePlayer = (teamId, playerId, patch) =>
+    const updatePlayer = (teamId, playerId, mutator) =>
         setTeams((prev) =>
-            prev.map((t) =>
-                t.id === teamId
-                    ? {
-                        ...t,
-                        players: t.players.map((p) =>
-                            p.id === playerId ? { ...p, ...patch } : p
-                        ),
-                    }
-                    : t
-            )
+            prev.map((t) => {
+                if (t.id !== teamId) return t;
+                return {
+                    ...t,
+                    players: t.players.map((p) => {
+                        if (p.id !== playerId) return p;
+                        // mutator can be a partial patch or a function
+                        if (typeof mutator === "function") return mutator(p);
+                        return { ...p, ...mutator };
+                    }),
+                };
+            })
         );
 
     const summary = useMemo(() => computeSummary(teams), [teams]);
@@ -185,7 +230,7 @@ function AppCore() {
                 sx={{
                     display: "grid",
                     gap: 2,
-                    gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+                    gridTemplateColumns: "1fr", // one full-width card per row
                     alignItems: "stretch",
                 }}
             >
@@ -197,7 +242,7 @@ function AppCore() {
                             onSetName={(name) => setTeamName(team.id, name)}
                             onAdd={() => addPlayer(team.id)}
                             onDelete={(pid) => deletePlayer(team.id, pid)}
-                            onUpdate={(pid, patch) => updatePlayer(team.id, pid, patch)}
+                            onUpdate={(pid, mut) => updatePlayer(team.id, pid, mut)}
                         />
                     </Box>
                 ))}
@@ -211,9 +256,8 @@ function AppCore() {
 }
 
 // ------------------------------------------------------------
-// Everything below: UNCHANGED (your original functions)
+// Header
 // ------------------------------------------------------------
-
 function Header({ onReset, onAddTeam }) {
     return (
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
@@ -236,7 +280,15 @@ function Header({ onReset, onAddTeam }) {
     );
 }
 
+// ------------------------------------------------------------
+// Team Editor (with asymmetric values)
+// ------------------------------------------------------------
 function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
+    const toTeamName = (teamId) => {
+        const t = allTeams.find((x) => x.id === teamId);
+        return t ? t.name : teamId || "—";
+    };
+
     return (
         <Paper
             variant="outlined"
@@ -264,73 +316,123 @@ function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
                 </Tooltip>
             </Box>
 
-            <Box sx={{ flex: 1, minHeight: 220, display: "flex", flexDirection: "column" }}>
-                <Table size="small" stickyHeader>
+            <Box sx={{ flex: 1, minHeight: 240, display: "flex", flexDirection: "column" }}>
+                <Table
+                    size="small"
+                    stickyHeader
+                    sx={{
+                        "& td, & th": { whiteSpace: "nowrap" }, // keep things from wrapping badly
+                    }}
+                >
                     <TableHead>
                         <TableRow>
                             <TableCell sx={{ width: 64 }}>Use</TableCell>
-                            <TableCell>Player</TableCell>
+                            <TableCell sx={{ minWidth: 420 /* give name the space */ }}>Player</TableCell>
                             <TableCell align="right" sx={{ width: 120 }}>
-                                Value
+                                You value
                             </TableCell>
-                            <TableCell sx={{ width: 140 }}>To</TableCell>
+                            <TableCell sx={{ width: 170 }}>To</TableCell>
+                            <TableCell align="right" sx={{ width: 130 }}>
+                                They value
+                            </TableCell>
                             <TableCell align="right" sx={{ width: 72 }}>
                                 Actions
                             </TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
-                        {team.players.map((p) => (
-                            <TableRow key={p.id} hover selected={!p.enabled}>
-                                <TableCell>
-                                    <Checkbox
-                                        checked={p.enabled}
-                                        onChange={(e) => onUpdate(p.id, { enabled: e.target.checked })}
-                                    />
-                                </TableCell>
-                                <TableCell>
-                                    <TextField
-                                        fullWidth
-                                        variant="standard"
-                                        value={p.name}
-                                        onChange={(e) => onUpdate(p.id, { name: e.target.value })}
-                                    />
-                                </TableCell>
-                                <TableCell align="right">
-                                    <TextField
-                                        type="number"
-                                        variant="standard"
-                                        value={p.value}
-                                        onChange={(e) => onUpdate(p.id, { value: Number(e.target.value) || 0 })}
-                                        inputProps={{ min: 0, step: 1 }}
-                                        fullWidth
-                                    />
-                                </TableCell>
-                                <TableCell>
-                                    <Select
-                                        variant="standard"
-                                        value={p.toTeamId}
-                                        onChange={(e) => onUpdate(p.id, { toTeamId: e.target.value })}
-                                        fullWidth
-                                    >
-                                        {allTeams.map((t) => (
-                                            <MenuItem key={t.id} value={t.id} disabled={t.id === team.id}>
-                                                {t.name}
-                                            </MenuItem>
-                                        ))}
-                                    </Select>
-                                </TableCell>
-                                <TableCell align="right">
-                                    <IconButton size="small" onClick={() => onDelete(p.id)}>
-                                        <DeleteRoundedIcon fontSize="small" />
-                                    </IconButton>
-                                </TableCell>
-                            </TableRow>
-                        ))}
+                        {team.players.map((p) => {
+                            const destId = p.toTeamId;
+                            const currentTheyVal =
+                                (p.receiverValues && typeof p.receiverValues[destId] === "number"
+                                    ? p.receiverValues[destId]
+                                    : 0) || 0;
+
+                            return (
+                                <TableRow key={p.id} hover selected={!p.enabled}>
+                                    <TableCell>
+                                        <Checkbox
+                                            checked={p.enabled}
+                                            onChange={(e) => onUpdate(p.id, { enabled: e.target.checked })}
+                                        />
+                                    </TableCell>
+
+                                    <TableCell>
+                                        <TextField
+                                            fullWidth
+                                            variant="standard"
+                                            value={p.name}
+                                            onChange={(e) => onUpdate(p.id, { name: e.target.value })}
+                                            inputProps={{ maxLength: 48 }}
+                                        />
+                                    </TableCell>
+
+                                    <TableCell align="right">
+                                        <TextField
+                                            type="number"
+                                            variant="standard"
+                                            value={p.senderValue}
+                                            onChange={(e) =>
+                                                onUpdate(p.id, {
+                                                    senderValue: numOrZero(e.target.value),
+                                                })
+                                            }
+                                            inputProps={{ min: 0, step: 1 }}
+                                            fullWidth
+                                        />
+                                    </TableCell>
+
+                                    <TableCell>
+                                        <Select
+                                            variant="standard"
+                                            value={destId}
+                                            onChange={(e) => {
+                                                const newDest = e.target.value;
+                                                onUpdate(p.id, { toTeamId: newDest });
+                                            }}
+                                            fullWidth
+                                        >
+                                            {allTeams.map((t) => (
+                                                <MenuItem key={t.id} value={t.id} disabled={t.id === team.id}>
+                                                    {t.name}
+                                                </MenuItem>
+                                            ))}
+                                        </Select>
+                                    </TableCell>
+
+                                    <TableCell align="right">
+                                        <Tooltip title={`Value to ${toTeamName(destId)}`}>
+                                            <TextField
+                                                type="number"
+                                                variant="standard"
+                                                value={currentTheyVal}
+                                                onChange={(e) =>
+                                                    onUpdate(p.id, (prev) => ({
+                                                        ...prev,
+                                                        receiverValues: {
+                                                            ...(prev.receiverValues || {}),
+                                                            [prev.toTeamId]: numOrZero(e.target.value),
+                                                        },
+                                                    }))
+                                                }
+                                                inputProps={{ min: 0, step: 1 }}
+                                                fullWidth
+                                            />
+                                        </Tooltip>
+                                    </TableCell>
+
+                                    <TableCell align="right">
+                                        <IconButton size="small" onClick={() => onDelete(p.id)}>
+                                            <DeleteRoundedIcon fontSize="small" />
+                                        </IconButton>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
 
                         {team.players.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={5}>
+                                <TableCell colSpan={6}>
                                     <Box
                                         sx={{
                                             py: 2,
@@ -362,6 +464,9 @@ function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
     );
 }
 
+// ------------------------------------------------------------
+// Summary uses asymmetric values
+// ------------------------------------------------------------
 function SummaryPanel({ summary, teams }) {
     return (
         <Paper variant="outlined" sx={{ p: 2 }}>
@@ -369,7 +474,7 @@ function SummaryPanel({ summary, teams }) {
                 Trade Summary
             </Typography>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-                Showing enabled players only. Net = incoming − outgoing.
+                Enabled players only. Net = incoming (their value to you) − outgoing (your value).
             </Typography>
             <Divider sx={{ my: 1.5 }} />
             <Box
@@ -399,11 +504,11 @@ function SummaryPanel({ summary, teams }) {
                         </Box>
 
                         <Typography variant="caption" color="text.secondary">
-                            Incoming
+                            Incoming (their value to you)
                         </Typography>
                         <ListLike items={summary.incomingByTeam[t.id]} />
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                            Outgoing
+                            Outgoing (your value)
                         </Typography>
                         <ListLike items={summary.outgoingByTeam[t.id]} />
                     </Paper>
@@ -426,7 +531,7 @@ function ListLike({ items }) {
             }}
         >
             {items.map((p) => (
-                <React.Fragment key={p.id}>
+                <React.Fragment key={p.__rowId || p.id}>
                     <Typography variant="body2" noWrap>
                         {p.name}
                     </Typography>
@@ -439,6 +544,9 @@ function ListLike({ items }) {
     );
 }
 
+// ------------------------------------------------------------
+// Core logic with asymmetric math
+// ------------------------------------------------------------
 function computeSummary(teams) {
     const incomingByTeam = {};
     const outgoingByTeam = {};
@@ -454,23 +562,58 @@ function computeSummary(teams) {
         for (const p of from.players) {
             if (!p.enabled) continue;
             const to = p.toTeamId;
-            if (!to || to === from.id) continue;
-            outgoingByTeam[from.id].push(p);
-            if (incomingByTeam[to]) incomingByTeam[to].push(p);
+            if (!to || to === from.id) continue; // not traded
+
+            // Outgoing: what the sender loses = senderValue
+            const outgoingVal = numOrZero(p.senderValue);
+            outgoingByTeam[from.id].push({
+                ...p,
+                __rowId: `${p.id}-out-${from.id}`,
+                value: outgoingVal,
+            });
+
+            // Incoming: what the receiver gains = receiverValues[to]
+            const receiverVal =
+                (p.receiverValues && typeof p.receiverValues[to] === "number"
+                    ? p.receiverValues[to]
+                    : 0) || 0;
+            if (incomingByTeam[to]) {
+                incomingByTeam[to].push({
+                    ...p,
+                    __rowId: `${p.id}-in-${to}`,
+                    value: receiverVal,
+                });
+            }
         }
     }
 
     for (const t of teams) {
-        const incoming = incomingByTeam[t.id].reduce((a, p) => a + (p.value || 0), 0);
-        const outgoing = outgoingByTeam[t.id].reduce((a, p) => a + (p.value || 0), 0);
+        const incoming = incomingByTeam[t.id].reduce((a, p) => a + numOrZero(p.value), 0);
+        const outgoing = outgoingByTeam[t.id].reduce((a, p) => a + numOrZero(p.value), 0);
         netByTeam[t.id] = incoming - outgoing;
     }
 
     return { incomingByTeam, outgoingByTeam, netByTeam };
 }
 
+// ------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------
 function otherTeamIds(currentId, allTeams) {
     return allTeams.filter((t) => t.id !== currentId).map((t) => t.id);
+}
+
+function suggestTeamId(teams) {
+    // Prefer single letters A..Z then T{n}
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    const existing = new Set(teams.map((t) => t.id));
+    for (const L of letters) if (!existing.has(L)) return L;
+    return `T${teams.length + 1}`;
+}
+
+function numOrZero(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
 }
 
 function fmt(n) {
