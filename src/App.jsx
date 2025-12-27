@@ -1,3 +1,6 @@
+// ✅ Fix 1: make the header NOT transparent and NOT overlap content
+// ✅ Fix 2: mobile UX: switch the players table to a stacked “card row” layout on xs
+
 import React, { useMemo, useState, useEffect } from "react";
 import {
     Box,
@@ -20,7 +23,11 @@ import {
     Stack,
     Divider,
     Button,
+    AppBar,
+    Toolbar,
+    useMediaQuery, FormControl, InputLabel,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import DeleteRoundedIcon from "@mui/icons-material/DeleteRounded";
@@ -28,7 +35,6 @@ import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import GroupAddRoundedIcon from "@mui/icons-material/GroupAddRounded";
 import GitHubIcon from "@mui/icons-material/GitHub";
 
-// 🔥 Theme Manager imports
 import {
     ThemeManagerProvider,
     ThemeSelector,
@@ -47,8 +53,6 @@ function upgradeTeamsSchema(rawTeams) {
     return rawTeams.map((t) => ({
         ...t,
         players: (t.players || []).map((p) => {
-            // Old schema had: { id, name, value, enabled, toTeamId }
-            // New schema: { id, name, senderValue, receiverValues, enabled, toTeamId }
             const senderValue =
                 typeof p.senderValue === "number"
                     ? p.senderValue
@@ -56,16 +60,14 @@ function upgradeTeamsSchema(rawTeams) {
                         ? p.value
                         : 0;
             const receiverValues =
-                p.receiverValues && typeof p.receiverValues === "object"
-                    ? p.receiverValues
-                    : {}; // empty; user fills per destination
+                p.receiverValues && typeof p.receiverValues === "object" ? p.receiverValues : {};
             return {
                 id: p.id,
                 name: p.name ?? "Player",
                 senderValue,
                 receiverValues,
                 enabled: p.enabled !== false,
-                toTeamId: p.toTeamId ?? t.id, // default to own team (no trade)
+                toTeamId: p.toTeamId ?? t.id,
             };
         }),
     }));
@@ -82,7 +84,7 @@ function loadSavedTeams() {
 }
 
 // ------------------------------------------------------------
-// 🔥 FINAL WRAPPED APP (FULL THEME MANAGER INTEGRATION)
+// ✅ Themed wrapper (now with proper AppBar)
 // ------------------------------------------------------------
 export default function ThemedApp() {
     return (
@@ -90,24 +92,8 @@ export default function ThemedApp() {
             <CssBaseline />
             <ThemeEditorModal />
 
-            {/* Header Controls */}
-            <Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 2000 }}>
-                <Stack direction="row" spacing={1}>
-                    <ThemeSelector />
-                    <NewThemeButton />
-                    <Tooltip title="View on GitHub">
-                        <IconButton
-                            component="a"
-                            href="https://github.com/rajrai/multi-team-trade-analyzer"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            color="inherit"
-                        >
-                            <GitHubIcon />
-                        </IconButton>
-                    </Tooltip>
-                </Stack>
-            </Box>
+            {/* ✅ Non-transparent, non-overlapping header */}
+            <TopBar />
 
             {/* Wrapped "real app" */}
             <AppCore />
@@ -115,8 +101,57 @@ export default function ThemedApp() {
     );
 }
 
+function TopBar() {
+    const theme = useTheme();
+    const isXs = useMediaQuery(theme.breakpoints.down("sm"));
+
+    return (
+        <AppBar
+            position="sticky"
+            elevation={0}
+            sx={{
+                borderBottom: 1,
+                borderColor: "divider",
+                bgcolor: "background.paper",
+                color: "text.primary",
+                backdropFilter: "blur(8px)",
+            }}
+        >
+            <Toolbar sx={{ gap: 1 }}>
+                <Typography
+                    variant={isXs ? "subtitle1" : "h6"}
+                    fontWeight={800}
+                    sx={{ flex: 1, minWidth: 0 }}
+                    noWrap
+                >
+                    Multi-Team Trade Analyzer
+                </Typography>
+
+                {/* Keep controls, but make them compact on mobile */}
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                    <ThemeSelector />
+                    {!isXs && <NewThemeButton />}
+
+                    <Tooltip title="View on GitHub">
+                        <IconButton
+                            component="a"
+                            href="https://github.com/rajrai/multi-team-trade-analyzer"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            color="inherit"
+                            size={isXs ? "small" : "medium"}
+                        >
+                            <GitHubIcon fontSize={isXs ? "small" : "medium"} />
+                        </IconButton>
+                    </Tooltip>
+                </Stack>
+            </Toolbar>
+        </AppBar>
+    );
+}
+
 // ------------------------------------------------------------
-// 🔥 App with asymmetric values
+// App with asymmetric values
 // ------------------------------------------------------------
 function AppCore() {
     const defaultTeams = [
@@ -128,7 +163,7 @@ function AppCore() {
                     id: "a1",
                     name: "Player A1",
                     senderValue: 32,
-                    receiverValues: { B: 35 }, // worth 35 to B
+                    receiverValues: { B: 35 },
                     enabled: true,
                     toTeamId: "B",
                 },
@@ -142,7 +177,7 @@ function AppCore() {
                     id: "b1",
                     name: "Player B1",
                     senderValue: 27,
-                    receiverValues: { A: 31 }, // worth 31 to A
+                    receiverValues: { A: 31 },
                     enabled: true,
                     toTeamId: "A",
                 },
@@ -183,7 +218,7 @@ function AppCore() {
                                 id: newId,
                                 name: "New Player",
                                 senderValue: 0,
-                                receiverValues: {}, // remembered per destination as user edits
+                                receiverValues: {},
                                 enabled: true,
                                 toTeamId: others[0] ?? teamId,
                             },
@@ -197,9 +232,7 @@ function AppCore() {
     const deletePlayer = (teamId, playerId) =>
         setTeams((prev) =>
             prev.map((t) =>
-                t.id === teamId
-                    ? { ...t, players: t.players.filter((p) => p.id !== playerId) }
-                    : t
+                t.id === teamId ? { ...t, players: t.players.filter((p) => p.id !== playerId) } : t
             )
         );
 
@@ -211,7 +244,6 @@ function AppCore() {
                     ...t,
                     players: t.players.map((p) => {
                         if (p.id !== playerId) return p;
-                        // mutator can be a partial patch or a function
                         if (typeof mutator === "function") return mutator(p);
                         return { ...p, ...mutator };
                     }),
@@ -222,15 +254,15 @@ function AppCore() {
     const summary = useMemo(() => computeSummary(teams), [teams]);
 
     return (
-        <Container maxWidth="lg" sx={{ py: 4 }}>
+        // ✅ mobile padding / spacing that feels normal
+        <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 4 } }}>
             <Header onReset={resetAll} onAddTeam={addTeam} />
 
-            {/* Team cards */}
             <Box
                 sx={{
                     display: "grid",
                     gap: 2,
-                    gridTemplateColumns: "1fr", // one full-width card per row
+                    gridTemplateColumns: "1fr",
                     alignItems: "stretch",
                 }}
             >
@@ -256,34 +288,32 @@ function AppCore() {
 }
 
 // ------------------------------------------------------------
-// Header
+// Header (now just actions; title moved to TopBar)
 // ------------------------------------------------------------
 function Header({ onReset, onAddTeam }) {
     return (
-        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-            <Typography variant="h5" fontWeight={700}>
-                Multi-Team Trade Analyzer
-            </Typography>
-            <Stack direction="row" spacing={1}>
-                <Tooltip title="Add another team">
-                    <IconButton color="primary" onClick={onAddTeam}>
-                        <GroupAddRoundedIcon />
-                    </IconButton>
-                </Tooltip>
-                <Tooltip title="Reset to defaults">
-                    <IconButton onClick={onReset}>
-                        <RestartAltRoundedIcon />
-                    </IconButton>
-                </Tooltip>
-            </Stack>
+        <Box display="flex" alignItems="center" justifyContent="flex-end" mb={2} gap={1}>
+            <Tooltip title="Add another team">
+                <IconButton color="primary" onClick={onAddTeam}>
+                    <GroupAddRoundedIcon />
+                </IconButton>
+            </Tooltip>
+            <Tooltip title="Reset to defaults">
+                <IconButton onClick={onReset}>
+                    <RestartAltRoundedIcon />
+                </IconButton>
+            </Tooltip>
         </Box>
     );
 }
 
 // ------------------------------------------------------------
-// Team Editor (with asymmetric values)
+// Team Editor (✅ table on desktop, ✅ card rows on mobile)
 // ------------------------------------------------------------
 function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
+    const theme = useTheme();
+    const isXs = useMediaQuery(theme.breakpoints.down("sm"));
+
     const toTeamName = (teamId) => {
         const t = allTeams.find((x) => x.id === teamId);
         return t ? t.name : teamId || "—";
@@ -293,21 +323,21 @@ function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
         <Paper
             variant="outlined"
             sx={{
-                p: 2,
+                p: { xs: 1.25, sm: 2 },
                 width: "100%",
                 display: "flex",
                 flexDirection: "column",
                 height: "100%",
             }}
         >
-            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1} gap={1}>
                 <TextField
                     label="Team name"
                     value={team.name}
                     onChange={(e) => onSetName(e.target.value)}
                     size="small"
                     inputProps={{ maxLength: 32 }}
-                    sx={{ mr: 1, flex: 1 }}
+                    sx={{ flex: 1, minWidth: 0 }}
                 />
                 <Tooltip title="Add player">
                     <IconButton color="primary" onClick={onAdd}>
@@ -316,81 +346,72 @@ function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
                 </Tooltip>
             </Box>
 
-            <Box sx={{ flex: 1, minHeight: 240, display: "flex", flexDirection: "column" }}>
-                <Table
-                    size="small"
-                    stickyHeader
-                    sx={{
-                        "& td, & th": { whiteSpace: "nowrap" }, // keep things from wrapping badly
-                    }}
-                >
-                    <TableHead>
-                        <TableRow>
-                            <TableCell sx={{ width: 64 }}>Use</TableCell>
-                            <TableCell sx={{ minWidth: 420 /* give name the space */ }}>Player</TableCell>
-                            <TableCell align="right" sx={{ width: 120 }}>
-                                You value
-                            </TableCell>
-                            <TableCell sx={{ width: 170 }}>To</TableCell>
-                            <TableCell align="right" sx={{ width: 130 }}>
-                                They value
-                            </TableCell>
-                            <TableCell align="right" sx={{ width: 72 }}>
-                                Actions
-                            </TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {team.players.map((p) => {
-                            const destId = p.toTeamId;
-                            const currentTheyVal =
-                                (p.receiverValues && typeof p.receiverValues[destId] === "number"
-                                    ? p.receiverValues[destId]
-                                    : 0) || 0;
+            {/* ✅ Mobile layout */}
+            {isXs ? (
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {team.players.map((p) => {
+                        const destId = p.toTeamId;
+                        const currentTheyVal =
+                            (p.receiverValues && typeof p.receiverValues[destId] === "number"
+                                ? p.receiverValues[destId]
+                                : 0) || 0;
 
-                            return (
-                                <TableRow key={p.id} hover selected={!p.enabled}>
-                                    <TableCell>
+                        return (
+                            <Paper key={p.id} variant="outlined" sx={{ p: 1 }}>
+                                <Box
+                                    sx={{
+                                        display: "grid",
+                                        gridTemplateColumns: "1fr 120px 44px", // main | numbers | actions
+                                        gridTemplateRows: "auto auto",
+                                        gap: 1,
+                                        alignItems: "stretch",
+                                    }}
+                                >
+                                    {/* Row 1 col 1: Player */}
+                                    <TextField
+                                        label="Player"
+                                        size="small"
+                                        value={p.name}
+                                        onChange={(e) => onUpdate(p.id, { name: e.target.value })}
+                                        inputProps={{ maxLength: 48 }}
+                                        fullWidth
+                                    />
+
+                                    {/* Row 1 col 2: You value */}
+                                    <TextField
+                                        label="You value"
+                                        type="number"
+                                        size="small"
+                                        value={p.senderValue}
+                                        onChange={(e) => onUpdate(p.id, { senderValue: numOrZero(e.target.value) })}
+                                        inputProps={{ min: 0, step: 1 }}
+                                        fullWidth
+                                    />
+
+                                    {/* Actions column spans both rows: checkbox top, delete bottom */}
+                                    <Stack
+                                        sx={{ gridRow: "1 / span 2", gridColumn: 3 }}
+                                        alignItems="center"
+                                        justifyContent="space-between"
+                                    >
                                         <Checkbox
                                             checked={p.enabled}
                                             onChange={(e) => onUpdate(p.id, { enabled: e.target.checked })}
+                                            size="small"
+                                            sx={{ p: 0.5 }}
                                         />
-                                    </TableCell>
+                                        <IconButton size="small" onClick={() => onDelete(p.id)} sx={{ p: 0.5 }}>
+                                            <DeleteRoundedIcon fontSize="small" />
+                                        </IconButton>
+                                    </Stack>
 
-                                    <TableCell>
-                                        <TextField
-                                            fullWidth
-                                            variant="standard"
-                                            value={p.name}
-                                            onChange={(e) => onUpdate(p.id, { name: e.target.value })}
-                                            inputProps={{ maxLength: 48 }}
-                                        />
-                                    </TableCell>
-
-                                    <TableCell align="right">
-                                        <TextField
-                                            type="number"
-                                            variant="standard"
-                                            value={p.senderValue}
-                                            onChange={(e) =>
-                                                onUpdate(p.id, {
-                                                    senderValue: numOrZero(e.target.value),
-                                                })
-                                            }
-                                            inputProps={{ min: 0, step: 1 }}
-                                            fullWidth
-                                        />
-                                    </TableCell>
-
-                                    <TableCell>
+                                    {/* Row 2 col 1: Send to (with label) */}
+                                    <FormControl size="small" fullWidth>
+                                        <InputLabel>Send to</InputLabel>
                                         <Select
-                                            variant="standard"
-                                            value={destId}
-                                            onChange={(e) => {
-                                                const newDest = e.target.value;
-                                                onUpdate(p.id, { toTeamId: newDest });
-                                            }}
-                                            fullWidth
+                                            label="Send to"
+                                            value={p.toTeamId}
+                                            onChange={(e) => onUpdate(p.id, { toTeamId: e.target.value })}
                                         >
                                             {allTeams.map((t) => (
                                                 <MenuItem key={t.id} value={t.id} disabled={t.id === team.id}>
@@ -398,68 +419,196 @@ function TeamEditor({ team, allTeams, onSetName, onAdd, onDelete, onUpdate }) {
                                                 </MenuItem>
                                             ))}
                                         </Select>
-                                    </TableCell>
+                                    </FormControl>
 
-                                    <TableCell align="right">
-                                        <Tooltip title={`Value to ${toTeamName(destId)}`}>
+                                    {/* Row 2 col 2: They value */}
+                                    <TextField
+                                        label="They value"
+                                        type="number"
+                                        size="small"
+                                        value={currentTheyVal}
+                                        onChange={(e) =>
+                                            onUpdate(p.id, (prev) => ({
+                                                ...prev,
+                                                receiverValues: {
+                                                    ...(prev.receiverValues || {}),
+                                                    [prev.toTeamId]: numOrZero(e.target.value),
+                                                },
+                                            }))
+                                        }
+                                        inputProps={{ min: 0, step: 1 }}
+                                        fullWidth
+                                    />
+                                </Box>
+                            </Paper>
+                        );
+                    })}
+
+                    {team.players.length === 0 && (
+                        <Paper variant="outlined" sx={{ p: 1 }}>
+                            <Box
+                                sx={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 2,
+                                }}
+                            >
+                                <Typography variant="body2" color="text.secondary">
+                                    No players yet.
+                                </Typography>
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={onAdd}
+                                    startIcon={<AddRoundedIcon />}
+                                >
+                                    Add player
+                                </Button>
+                            </Box>
+                        </Paper>
+                    )}
+                </Box>
+            ) : (
+                // ✅ Desktop/tablet layout (kept)
+                <Box sx={{ flex: 1, minHeight: 240, display: "flex", flexDirection: "column" }}>
+                    <Table
+                        size="small"
+                        stickyHeader
+                        sx={{
+                            "& td, & th": { whiteSpace: "nowrap" },
+                        }}
+                    >
+                        <TableHead>
+                            <TableRow>
+                                <TableCell sx={{ width: 64 }}>Use</TableCell>
+                                <TableCell sx={{ minWidth: 120 }}>Player</TableCell>
+                                <TableCell align="right" sx={{ width: 120 }}>
+                                    You value
+                                </TableCell>
+                                <TableCell sx={{ width: 170 }}>To</TableCell>
+                                <TableCell align="right" sx={{ width: 64 }}>
+                                    They value
+                                </TableCell>
+                                <TableCell align="right" sx={{ width: 72 }}>
+                                    Actions
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {team.players.map((p) => {
+                                const destId = p.toTeamId;
+                                const currentTheyVal =
+                                    (p.receiverValues && typeof p.receiverValues[destId] === "number"
+                                        ? p.receiverValues[destId]
+                                        : 0) || 0;
+
+                                return (
+                                    <TableRow key={p.id} hover selected={!p.enabled}>
+                                        <TableCell>
+                                            <Checkbox
+                                                checked={p.enabled}
+                                                onChange={(e) => onUpdate(p.id, { enabled: e.target.checked })}
+                                            />
+                                        </TableCell>
+
+                                        <TableCell>
+                                            <TextField
+                                                fullWidth
+                                                variant="standard"
+                                                value={p.name}
+                                                onChange={(e) => onUpdate(p.id, { name: e.target.value })}
+                                                inputProps={{ maxLength: 48 }}
+                                            />
+                                        </TableCell>
+
+                                        <TableCell align="right">
                                             <TextField
                                                 type="number"
                                                 variant="standard"
-                                                value={currentTheyVal}
-                                                onChange={(e) =>
-                                                    onUpdate(p.id, (prev) => ({
-                                                        ...prev,
-                                                        receiverValues: {
-                                                            ...(prev.receiverValues || {}),
-                                                            [prev.toTeamId]: numOrZero(e.target.value),
-                                                        },
-                                                    }))
-                                                }
+                                                value={p.senderValue}
+                                                onChange={(e) => onUpdate(p.id, { senderValue: numOrZero(e.target.value) })}
                                                 inputProps={{ min: 0, step: 1 }}
                                                 fullWidth
                                             />
-                                        </Tooltip>
-                                    </TableCell>
+                                        </TableCell>
 
-                                    <TableCell align="right">
-                                        <IconButton size="small" onClick={() => onDelete(p.id)}>
-                                            <DeleteRoundedIcon fontSize="small" />
-                                        </IconButton>
+                                        <TableCell>
+                                            <Select
+                                                variant="standard"
+                                                value={destId}
+                                                onChange={(e) => onUpdate(p.id, { toTeamId: e.target.value })}
+                                                fullWidth
+                                            >
+                                                {allTeams.map((t) => (
+                                                    <MenuItem key={t.id} value={t.id} disabled={t.id === team.id}>
+                                                        {t.name}
+                                                    </MenuItem>
+                                                ))}
+                                            </Select>
+                                        </TableCell>
+
+                                        <TableCell align="right">
+                                            <Tooltip title={`Value to ${toTeamName(destId)}`}>
+                                                <TextField
+                                                    type="number"
+                                                    variant="standard"
+                                                    value={currentTheyVal}
+                                                    onChange={(e) =>
+                                                        onUpdate(p.id, (prev) => ({
+                                                            ...prev,
+                                                            receiverValues: {
+                                                                ...(prev.receiverValues || {}),
+                                                                [prev.toTeamId]: numOrZero(e.target.value),
+                                                            },
+                                                        }))
+                                                    }
+                                                    inputProps={{ min: 0, step: 1 }}
+                                                    fullWidth
+                                                />
+                                            </Tooltip>
+                                        </TableCell>
+
+                                        <TableCell align="right">
+                                            <IconButton size="small" onClick={() => onDelete(p.id)}>
+                                                <DeleteRoundedIcon fontSize="small" />
+                                            </IconButton>
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
+
+                            {team.players.length === 0 && (
+                                <TableRow>
+                                    <TableCell colSpan={6}>
+                                        <Box
+                                            sx={{
+                                                py: 2,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "space-between",
+                                                gap: 2,
+                                            }}
+                                        >
+                                            <Typography variant="body2" color="text.secondary">
+                                                No players yet.
+                                            </Typography>
+                                            <Button
+                                                size="small"
+                                                variant="outlined"
+                                                onClick={onAdd}
+                                                startIcon={<AddRoundedIcon />}
+                                            >
+                                                Add player
+                                            </Button>
+                                        </Box>
                                     </TableCell>
                                 </TableRow>
-                            );
-                        })}
-
-                        {team.players.length === 0 && (
-                            <TableRow>
-                                <TableCell colSpan={6}>
-                                    <Box
-                                        sx={{
-                                            py: 2,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "space-between",
-                                            gap: 2,
-                                        }}
-                                    >
-                                        <Typography variant="body2" color="text.secondary">
-                                            No players yet.
-                                        </Typography>
-                                        <Button
-                                            size="small"
-                                            variant="outlined"
-                                            onClick={onAdd}
-                                            startIcon={<AddRoundedIcon />}
-                                        >
-                                            Add player
-                                        </Button>
-                                    </Box>
-                                </TableCell>
-                            </TableRow>
-                        )}
-                    </TableBody>
-                </Table>
-            </Box>
+                            )}
+                        </TableBody>
+                    </Table>
+                </Box>
+            )}
         </Paper>
     );
 }
@@ -562,9 +711,8 @@ function computeSummary(teams) {
         for (const p of from.players) {
             if (!p.enabled) continue;
             const to = p.toTeamId;
-            if (!to || to === from.id) continue; // not traded
+            if (!to || to === from.id) continue;
 
-            // Outgoing: what the sender loses = senderValue
             const outgoingVal = numOrZero(p.senderValue);
             outgoingByTeam[from.id].push({
                 ...p,
@@ -572,11 +720,8 @@ function computeSummary(teams) {
                 value: outgoingVal,
             });
 
-            // Incoming: what the receiver gains = receiverValues[to]
             const receiverVal =
-                (p.receiverValues && typeof p.receiverValues[to] === "number"
-                    ? p.receiverValues[to]
-                    : 0) || 0;
+                (p.receiverValues && typeof p.receiverValues[to] === "number" ? p.receiverValues[to] : 0) || 0;
             if (incomingByTeam[to]) {
                 incomingByTeam[to].push({
                     ...p,
@@ -604,7 +749,6 @@ function otherTeamIds(currentId, allTeams) {
 }
 
 function suggestTeamId(teams) {
-    // Prefer single letters A..Z then T{n}
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
     const existing = new Set(teams.map((t) => t.id));
     for (const L of letters) if (!existing.has(L)) return L;
